@@ -165,7 +165,7 @@ export default function Home() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <h1>Make your own "Teachable Machine" using Transfer Learning with MobileNet v3 in TensorFlow.js using saved graph model from TFHub.</h1>
+      <h1>Make your own Teachable Machine using Transfer Learning with MobileNet v3 in TensorFlow.js using saved graph model from TFHub.</h1>
     
       <p id="status">{status}</p>
     

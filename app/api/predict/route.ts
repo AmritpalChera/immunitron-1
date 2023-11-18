@@ -20,6 +20,6 @@ export async function POST(request: Request) {
     let predictionArray = prediction.arraySync();
     percent = predictionArray[highestIndex];
   });
-  return { highestIndex, percent };
+  return Response.json({ data: 'success', highestIndex, percent });
   // poseDectector();
 }
