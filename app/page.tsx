@@ -1,113 +1,184 @@
+"use client";
+
 import Image from 'next/image'
+import { useRef, useState, useEffect } from 'react';
+import * as tf from '@tensorflow/tfjs';
+import * as poseDetection from '@tensorflow-models/pose-detection';
+
+const MOBILE_NET_INPUT_WIDTH = 224;
+const MOBILE_NET_INPUT_HEIGHT = 224;
+
 
 export default function Home() {
+  
+  // states
+  const STOP_DATA_GATHER = -1;
+  const CLASS_NAMES = ["1", "2"];
+
+  const VIDEO = useRef<HTMLVideoElement>(null);
+ 
+
+  const [gatherDataState, setGatherDataState] = useState(STOP_DATA_GATHER);
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const [trainingDataInput, setTrainingDataInputs] = useState<any>([]);
+  const [tainingDataOutputs, setTrainingDataOutputs] = useState<any>([]);
+  const [examplesCount, setExamplesCount] = useState<any>([]);
+  const [isPredicting, setIsPredicting] = useState(false);
+  const [status, setStatus] = useState('Awaiting TF.js load');
+  const [mobilenet, setMobilenet] = useState<any>(undefined);
+  const [animationFrame, setAnimationFrame] = useState<any>([undefined, undefined]);
+
+  function enableCam() {
+    if (hasGetUserMedia() && VIDEO.current) {
+      // getUsermedia parameters.
+      const constraints = {
+        video: true,
+        width: 640, 
+        height: 480 
+      };
+  
+      // Activate the webcam stream.
+      navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
+        VIDEO.current!.srcObject = stream;
+        VIDEO.current!.addEventListener('loadeddata', function() {
+          setVideoPlaying(true);
+        });
+      });
+    } else {
+      console.warn('getUserMedia() is not supported by your browser');
+    }
+  }
+
+  async function loadMobileNetFeatureModel() {
+    const URL = 
+      'https://tfhub.dev/google/tfjs-model/imagenet/mobilenet_v3_small_100_224/feature_vector/5/default/1';
+    
+    const mobi = await tf.loadGraphModel(URL, {fromTFHub: true});
+    setStatus('MobileNet v3 loaded successfully!');
+    
+    // Warm up the model by passing zeros through it once.
+    tf.tidy(function () {
+      let answer = mobi.predict(tf.zeros([1, MOBILE_NET_INPUT_HEIGHT, MOBILE_NET_INPUT_WIDTH, 3]));
+      console.log(answer);
+    });
+    setMobilenet(mobi);
+  }
+
+  function dataGatherLoop() {
+    
+    if (videoPlaying && gatherDataState !== STOP_DATA_GATHER) {
+      let imageFeatures = tf.tidy(function() {
+        let videoFrameAsTensor = tf.browser.fromPixels(VIDEO.current!);
+        let resizedTensorFrame = tf.image.resizeBilinear(videoFrameAsTensor, [MOBILE_NET_INPUT_HEIGHT, 
+            MOBILE_NET_INPUT_WIDTH], true);
+        let normalizedTensorFrame = resizedTensorFrame.div(255);
+        return mobilenet.predict(normalizedTensorFrame.expandDims()).squeeze();
+      });
+      setTrainingDataInputs([...trainingDataInput, imageFeatures]);
+      setTrainingDataOutputs([...tainingDataOutputs, gatherDataState]);
+      
+      let exps = examplesCount;
+      // Intialize array index element if currently undefined.
+      if (examplesCount[gatherDataState] === undefined) {
+        exps[gatherDataState] = 0;
+      }
+
+      exps[gatherDataState] += 1;
+      setExamplesCount(exps);
+  
+
+      setStatus('Class ' + CLASS_NAMES[gatherDataState] + ' data count: ' + examplesCount[gatherDataState] + '. ');
+      
+      let _animationFrame = [...animationFrame];
+      console.log("Gather data state is: ", gatherDataState)
+      _animationFrame[gatherDataState] =  window.requestAnimationFrame(dataGatherLoop);
+      setAnimationFrame(_animationFrame);
+    }
+
+    if (gatherDataState === STOP_DATA_GATHER) {
+      stopGatheringData();
+    }
+    
+  }
+
+  
+  function gatherDataForClass(classNumber: number) {
+    setGatherDataState(classNumber);
+  }
+
+  useEffect(() => {
+    dataGatherLoop()
+  }, [gatherDataState])
+
+  function hasGetUserMedia() {
+    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  }
+
+  function stopGatheringData() {
+    setGatherDataState(STOP_DATA_GATHER);
+    // clear both the animation frames
+    console.log('calling stop gather data on: ', animationFrame);
+    for (let a = 0; a < animationFrame.length; a++) {
+      if (animationFrame[a]) window.cancelAnimationFrame(animationFrame[a]);
+    }
+    setAnimationFrame([undefined, undefined]);
+    
+  }
+
+  function reset() {
+    setIsPredicting(false);
+    setExamplesCount([]);
+    for (let i = 0; i < trainingDataInput.length; i++) {
+      trainingDataInput[i].dispose();
+    }
+    stopGatheringData();
+    setTrainingDataInputs([]);
+    setTrainingDataOutputs([]);
+    setStatus('No data collected');
+    
+    console.log('Tensors in memory: ' + tf.memory().numTensors);
+  }
+
+  async function trainModel() {
+    const res = await fetch('/api/trainModel', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/JSON'
+      },
+      body: JSON.stringify({
+        tensorData: ['1', '1']
+      })
+    });
+    const data = await res.json();
+
+    console.log('training data output is: ', tainingDataOutputs);
+    console.log('training data input is: ', trainingDataInput);
+
+    console.log(data);
+  }
+  
+
+
+  useEffect(() => {
+    loadMobileNetFeatureModel();
+  }, [])
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 max-w-5xl w-full items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:h-auto lg:w-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{' '}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
-        </div>
+      <h1>Make your own "Teachable Machine" using Transfer Learning with MobileNet v3 in TensorFlow.js using saved graph model from TFHub.</h1>
+    
+      <p id="status">{status}</p>
+    
+      <video ref={VIDEO} id="webcam" autoPlay muted></video>
+      <div className='flex flex-wrap gap-4'>
+        {!videoPlaying && <button id="enableCam" className=' bg-green-600 text-white rounded px-4 py-2' onClick={enableCam}>Enable Webcam</button>}
+        <button className="bg-blue-500 text-white px-4 py-2 rounded" data-1hot="0" onClick={() => gatherDataForClass(0)} data-name="Class 1">Gather Class 1 Data</button>
+        <button className="bg-blue-500 text-white px-4 py-2 rounded" data-1hot="1" onClick={() => gatherDataForClass(1)} data-name="Class 2">Gather Class 2 Data</button>
+        <button className="bg-blue-500 text-white px-4 py-2 rounded" data-1hot="2" onClick={stopGatheringData} data-name="Class 2">Stop gathering</button>
+        <button id="train" onClick={trainModel} className='bg-yellow-500 rounded px-4 py-2'>Train &amp; Predict!</button>
+        <button id="reset" onClick={reset} className='bg-red-500 text-white px-4 py-2 rounded'>Reset</button>
       </div>
-
-      <div className="relative flex place-items-center before:absolute before:h-[300px] before:w-[480px] before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-[240px] after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 before:lg:h-[360px] z-[-1]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
-
-      <div className="mb-32 grid text-center lg:max-w-5xl lg:w-full lg:mb-0 lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Docs{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
-
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Learn{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Templates{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Explore starter templates for Next.js.
-          </p>
-        </a>
-
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className={`mb-3 text-2xl font-semibold`}>
-            Deploy{' '}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className={`m-0 max-w-[30ch] text-sm opacity-50`}>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
+      
     </main>
   )
 }
