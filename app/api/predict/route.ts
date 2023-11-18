@@ -1,4 +1,4 @@
-import kv from '@vercel/kv';
+import {kv} from '@vercel/kv';
 import * as tf from '@tensorflow/tfjs';
 import * as poseDetection from '@tensorflow-models/pose-detection';
 

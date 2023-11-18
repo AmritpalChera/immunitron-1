@@ -1,4 +1,4 @@
-import kv from '@vercel/kv';
+import {kv} from '@vercel/kv';
 import * as tf from '@tensorflow/tfjs';
 import * as poseDetection from '@tensorflow-models/pose-detection';
 
@@ -30,12 +30,17 @@ export async function POST(request: Request) {
   const body = await request.json();
   console.log('request is: ', body);
   const { trainingDataInputs, trainingDataOutputs, numberInputs} = body;
+  await kv.set('trainingDataOutputs', JSON.stringify(trainingDataOutputs));
+  await kv.set('trainingDataInputs', JSON.stringify(trainingDataInputs));
+  await kv.set('numberInputs', JSON.stringify(numberInputs));
+  console.log('kv set');
 
-  await kv.set('trainingDataOutputs', trainingDataOutputs);
-  await kv.set('trainingDataInputs', trainingDataInputs);
-  await kv.set('numberInputs', numberInputs);
   const mobilenet = await loadMobileNetFeatureModel();
-  await kv.set('mobilenet', mobilenet);
+  
+  console.log('mobilenet is: ', mobilenet)
+  await kv.set('mobilenet', (mobilenet));
+
+  console.log('mobilenet set in kv');
 
   let model = tf.sequential();
   model.add(tf.layers.dense({inputShape: [1024], units: 128, activation: 'relu'}));
